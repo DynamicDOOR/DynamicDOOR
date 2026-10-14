@@ -1,0 +1,339 @@
+---
+title: "Dynamic DOOR: one simulated dataset, five fits"
+vignette: >
+  %\VignetteIndexEntry{Dynamic DOOR: five estimators}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    self_contained: true
+---
+
+This example generates one dataset in long format, converts it to wide format,
+and fits AIPW and TMLE, each with and without cross-fitting, plus pooled-targeting TMLE (TMLE-P). All analyses use logistic regression for treatment,
+proportional-probit regression for the ordinal outcomes, and analytic variance
+correction. The figures show time-specific point estimates and corrected 95%
+pointwise confidence intervals by default, alongside a Monte Carlo approximation to the population
+true value.
+
+## Load the functions
+
+Install the package with `R CMD INSTALL .` from the package root,
+then knit this document from `vignettes/`. The example uses the installed
+`DynamicDOOR` package; no source files need to be loaded manually.
+See `?fit_dynamic_door` for arguments and inference options.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = TRUE,
+  fig.width = 7,
+  fig.height = 4.5,
+  dpi = 144
+)
+```
+
+```{r load-functions}
+library(DynamicDOOR)
+```
+
+## Generate one simulated dataset
+
+The existing `gen_toy_data()` function generates 5,000 independent subjects,
+each observed at six visits. Its `$long_data` component contains one row per
+subject and visit, with `id`, `time`, `Treatment`, baseline covariates `X1`--`X5`,
+and observed outcome `Y`.
+Outcomes have four ordered categories, with larger values representing more
+desirable outcomes. The same dataset is used for all five fits.
+
+```{r simulate-long}
+long_data <- gen_toy_data(n = 5000, K = 4, seed = 0)$long_data
+head(long_data)
+```
+
+### Convert to wide format
+
+`fit_dynamic_door()` takes one row per subject and one outcome column per visit.
+Specify the subject, visit, outcome, and baseline column names in `long_to_wide()`.
+Treatment and baseline covariates must be constant within each subject. `times`
+and `outcome_columns` specify the visit order and corresponding output names;
+the outcome factor levels are preserved.
+
+```{r convert-to-wide}
+times <- c(5, 10, 15, 20, 25, 30)
+outcome_columns <- paste0("PrimaryDOOROutcome_collapsed_", times)
+predictors <- c("X1", "X2", "X3", "X4", "X5")
+
+obs_data <- long_to_wide(
+  long_data,
+  id = "id",
+  time = "time",
+  outcome = "Y",
+  baseline_columns = c(predictors, "Treatment"),
+  times = times,
+  outcome_columns = outcome_columns
+)
+head(obs_data)
+```
+
+### Calculate the population reference values
+
+The existing `true_psi_p_gen()` function averages the known generating category
+probabilities over a separate large sample of covariates, then calculates the
+population win probability at each visit. With `M = 100000`, this gives a Monte
+Carlo approximation to the true values. The five fitted analyses still use only
+the single dataset of 5,000 subjects generated above.
+
+```{r population-truth}
+true_values <- true_psi_p_gen(M = 100000, K = 4, seed = 123)
+truth <- data.frame(time = times, true_psi = true_values$true_psi)
+```
+
+## Fit the five methods
+
+The arguments below explicitly identify the treatment, outcomes, predictors,
+category order, and visit times. We use `scale = FALSE` to match the original
+simulations: binary covariates are already coded 0/1, and continuous covariates
+are generated with SD 1 and moderate means. In practice, `scale = TRUE`
+standardizes all numeric predictors to sample mean zero and SD one before fitting.
+
+Explicitly supply `outcome`, `varc`, and `correction`. Here `varc = TRUE` with
+`correction = "proposition"` computes both ordinary EIF-based and parametrically
+corrected inference. All three cross-fitted analyses use the same seed and
+five-fold partition. The time average assigns equal weight to each visit.
+
+We request `ci_trajectory = "both"` so the same fit can display pointwise or
+chi-square simultaneous bounds without refitting. Set `plot = FALSE` during
+fitting because the following chunks draw each plot explicitly. `plot = TRUE`
+would display and store the plot when the fit is created.
+
+```{r common-arguments}
+common_arguments <- list(
+  obs_data = obs_data,
+  treatment = "Treatment",
+  outcome_columns = outcome_columns,
+  trt_predictors = predictors,
+  outcome_predictors = predictors,
+  outcome_levels = as.character(1:4),
+  times = times,
+  outcome = "polr",
+  varc = TRUE,
+  correction = "proposition",
+  ci_trajectory = "both",
+  plot = FALSE,
+  V = 5,
+  seed = 1,
+  scale = FALSE,
+  conf_level = 0.95,
+  weights = rep(1 / length(times), length(times))
+)
+```
+
+Each call to `plot()` uses the existing `plot.dynamic_door()` method.
+Colored points are estimates and error bars are corrected 95% confidence
+intervals. The black dotted curve is the population truth approximated above;
+the gray dashed reference line is 0.5. To display ordinary EIF-based intervals
+instead, set `corrected = FALSE`.
+
+```{r plot-reference}
+truth_layer <- ggplot2::geom_line(
+  data = truth,
+  mapping = ggplot2::aes(x = time, y = true_psi),
+  inherit.aes = FALSE,
+  color = "black",
+  linetype = "dotted",
+  linewidth = 0.9
+)
+```
+
+### AIPW without cross-fitting
+
+```{r fit-aipw}
+fit_aipw <- do.call(
+  fit_dynamic_door,
+  c(common_arguments, list(method = "AIPW", cf = FALSE))
+)
+```
+
+```{r plot-aipw}
+plot(fit_aipw, corrected = TRUE, ci_trajectory = "pointwise", xlab = "Time (days)") +
+  truth_layer +
+  ggplot2::labs(
+    title = "AIPW without cross-fitting",
+    subtitle = "Black dotted line: population truth (Monte Carlo)"
+  ) +
+  ggplot2::scale_color_manual(values = "#2563A6") +
+  ggplot2::theme(legend.position = "none")
+```
+
+### AIPW with cross-fitting
+
+```{r fit-aipw-cf}
+fit_aipw_cf <- do.call(
+  fit_dynamic_door,
+  c(common_arguments, list(method = "AIPW", cf = TRUE))
+)
+```
+
+```{r plot-aipw-cf}
+plot(fit_aipw_cf, corrected = TRUE, ci_trajectory = "pointwise", xlab = "Time (days)") +
+  truth_layer +
+  ggplot2::labs(
+    title = "AIPW with five-fold cross-fitting",
+    subtitle = "Black dotted line: population truth (Monte Carlo)"
+  ) +
+  ggplot2::scale_color_manual(values = "#16817A") +
+  ggplot2::theme(legend.position = "none")
+```
+
+### TMLE without cross-fitting
+
+```{r fit-tmle}
+fit_tmle <- do.call(
+  fit_dynamic_door,
+  c(common_arguments, list(method = "TMLE", cf = FALSE))
+)
+```
+
+```{r plot-tmle}
+plot(fit_tmle, corrected = TRUE, ci_trajectory = "pointwise", xlab = "Time (days)") +
+  truth_layer +
+  ggplot2::labs(
+    title = "TMLE without cross-fitting",
+    subtitle = "Black dotted line: population truth (Monte Carlo)"
+  ) +
+  ggplot2::scale_color_manual(values = "#A86B16") +
+  ggplot2::theme(legend.position = "none")
+```
+
+### TMLE with cross-fitting
+
+```{r fit-tmle-cf}
+fit_tmle_cf <- do.call(
+  fit_dynamic_door,
+  c(common_arguments, list(method = "TMLE", cf = TRUE))
+)
+```
+
+```{r plot-tmle-cf}
+plot(fit_tmle_cf, corrected = TRUE, ci_trajectory = "pointwise", xlab = "Time (days)") +
+  truth_layer +
+  ggplot2::labs(
+    title = "TMLE with five-fold cross-fitting",
+    subtitle = "Black dotted line: population truth (Monte Carlo)"
+  ) +
+  ggplot2::scale_color_manual(values = "#8052A4") +
+  ggplot2::theme(legend.position = "none")
+```
+
+### TMLE with pooled targeting
+
+TMLE-P uses the same held-out nuisance predictions as TMLE-CF, but estimates a
+shared fluctuation across evaluation folds.
+
+```{r fit-tmle-p}
+fit_tmle_p <- do.call(
+  fit_dynamic_door,
+  c(common_arguments, list(method = "TMLE-P", cf = TRUE))
+)
+```
+
+```{r plot-tmle-p}
+plot(fit_tmle_p, corrected = TRUE, ci_trajectory = "pointwise", xlab = "Time (days)") +
+  truth_layer +
+  ggplot2::labs(
+    title = "TMLE with pooled targeting",
+    subtitle = "Black dotted line: population truth (Monte Carlo)"
+  ) +
+  ggplot2::scale_color_manual(values = "#B84D58") +
+  ggplot2::theme(legend.position = "none")
+```
+
+## Compare pointwise and simultaneous inference
+
+`ci_trajectory` accepts `"pointwise"`, `"simul"`, or `"both"`. For $T$ visits,
+pointwise bounds use $z_{1-\alpha/2}$ and simultaneous bounds use
+$\sqrt{\chi^2_{T,1-\alpha}}$ times the visit-specific SE. The latter are coordinate
+projections of a joint Wald ellipsoid. The time-average interval remains pointwise.
+
+Reuse the AIPW fit to display both types of bounds with ordinary and corrected
+inference. Dark bars show pointwise intervals; light bars show the projections
+of the chi-square joint region.
+
+```{r plot-ci-comparison, fig.width=8}
+plot(fit_aipw, corrected = TRUE, ci_trajectory = "both", xlab = "Time (days)") +
+  truth_layer + ggplot2::labs(title = "AIPW: corrected inference")
+```
+
+Joint membership uses the full covariance matrix $\widehat V$ of the estimated
+trajectory:
+
+\[
+(\widehat{\boldsymbol\psi}-\boldsymbol\psi_0)^\top
+\widehat V^{-1}(\widehat{\boldsymbol\psi}-\boldsymbol\psi_0)
+\leq \chi^2_{T,0.95}.
+\]
+
+`joint_tests` evaluates the supplied `null_trajectory`, which defaults to 0.5 at
+every visit. Checking whether all plotted bounds contain a trajectory is not the
+same as this joint test. Singular covariance makes joint inference unavailable;
+the code does not substitute Bonferroni intervals.
+
+```{r joint-inference}
+knitr::kable(fit_aipw$joint_tests, digits = 4)
+
+# Evaluate the Monte Carlo population reference using the corrected covariance.
+region <- fit_aipw$joint$corrected
+difference <- fit_aipw$fit$psi - truth$true_psi
+statistic <- as.numeric(crossprod(difference, region$precision %*% difference))
+data.frame(statistic = statistic, critical = region$critical,
+           reference_in_region = statistic <= region$critical)
+```
+
+## Compare the time-averaged results
+
+The plots display individual visits. This table reports the equally weighted
+time average, its ordinary and corrected standard errors, and its corrected
+95% confidence interval. Complete visit-level results remain available in
+`results` and in each fitted object's `$results` component.
+
+```{r collect-results}
+fits <- list(
+  "AIPW" = fit_aipw,
+  "AIPW with cross-fitting" = fit_aipw_cf,
+  "TMLE" = fit_tmle,
+  "TMLE with cross-fitting" = fit_tmle_cf,
+  "TMLE-P" = fit_tmle_p
+)
+
+result_tables <- vector("list", length(fits))
+for (i in seq_along(fits)) {
+  result_tables[[i]] <- data.frame(
+    method = names(fits)[i],
+    fits[[i]]$results,
+    row.names = NULL
+  )
+}
+results <- do.call(rbind, result_tables)
+```
+
+```{r average-results}
+average_results <- results[results$target == "average", c(
+  "method", "estimate", "se", "se_corrected",
+  "ci_lower_corrected", "ci_upper_corrected"
+)]
+
+knitr::kable(
+  average_results,
+  row.names = FALSE,
+  digits = 4,
+  col.names = c(
+    "Method", "Estimate", "EIF SE", "Corrected SE",
+    "Corrected CI lower", "Corrected CI upper"
+  )
+)
+```
+

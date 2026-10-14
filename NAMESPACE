@@ -1,0 +1,8 @@
+export(fit_dynamic_door)
+export(long_to_wide)
+export(gen_toy_data)
+export(true_psi_p_gen)
+S3method(plot,dynamic_door)
+import(stats)
+importFrom(utils,head,tail,write.table)
+importFrom(graphics,plot)

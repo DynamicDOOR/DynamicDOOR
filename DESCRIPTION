@@ -1,0 +1,15 @@
+Package: DynamicDOOR
+Type: Package
+Title: Estimation and Inference for Longitudinal Ordinal Win Probabilities
+Version: 0.1.0
+Authors@R: person("Anonymous", "Authors", email = "anonymous@example.org", role = c("aut", "cre"))
+Description: Estimates visit-specific and weighted-average win probabilities
+    for repeated ordinal outcomes using augmented inverse probability weighting
+    and targeted maximum likelihood estimation, with optional cross-fitting,
+    pooled targeting, and corrections for nuisance estimation.
+License: file LICENSE
+Encoding: UTF-8
+Depends: R (>= 4.1.0)
+Imports: stats, utils, graphics, MASS, nnet, rpart, ggplot2
+Suggests: knitr, rmarkdown
+VignetteBuilder: knitr
